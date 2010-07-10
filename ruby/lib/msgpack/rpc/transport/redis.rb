@@ -19,10 +19,17 @@
 # Here's a quick example:
 # 
 # Client:
-# client = MessagePack::RPC::Client.new(RedisTransport.new("my_queue_name"), nil)
+# require "msgpack/rpc"
+# require 'msgpack/rpc/transport/redis'
+# 
+# client = MessagePack::RPC::Client.new(MessagePack::RPC::RedisTransport.new("my_queue_name"), nil)
 # result = client.call(:mymethod, "hello", 1)
 #
+# 
 # Server:
+# require "msgpack/rpc"
+# require 'msgpack/rpc/transport/redis'
+# 
 # class ServerImpl
 #   def mymethod(string, number)
 #     puts "mymethod() got called... #{string.inspect} #{number.inspect}"
@@ -32,7 +39,7 @@
 # end
 # 
 # svr = MessagePack::RPC::Server.new
-# svr.listen(RedisServerTransport.new(nil, 'my_queue_name'), ServerImpl.new)
+# svr.listen(MessagePack::RPC::RedisServerTransport.new('my_queue_name'), ServerImpl.new)
 
 require 'redis'
 
