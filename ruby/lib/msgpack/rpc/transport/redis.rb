@@ -63,16 +63,23 @@ end
 class RedisClientTransport
   attr_reader :identifier
   
+  # Pass in {:ignore_return_value => true} as part of the redis_options so that the server doesn't put the return
+  # object in a queue.  This is useful if you're doing call_async and never care about the return value.  It saves
+  # Redis from adding a key/list pair.  A synchronous call will result in an immediate timeout exception.
 	def initialize(session, redis_options, queue_name)
 		@session = session
 		@queue_name = queue_name
+    @ignore_return_value = !!redis_options.delete(:ignore_return_value)
+    if @ignore_return_value
+      @session.timeout = 0
+    end
 		@redis = Redis.new(redis_options)
 		# assign a unique client key for this instance which will be used for return values
 		@identifier = @redis.incr("MessagePack-RPC-Client-Key")
 		@return_queue_name = "rpc-return-identifier-#{@identifier}"
 		@checker = MessagePack::RPC::LoopUtil::Timer.new(1, true) do |x|
-  		data = @redis.blpop(@return_queue_name, 0)
-      if data[1]
+  		data = @redis.blpop(@return_queue_name, 0) unless @ignore_return_value
+      if data && data[1]
         redis_packet = MessagePack.unpack(data[1])
         if redis_packet[1] == REDIS_DATA
           msg = MessagePack.unpack(redis_packet[0])
@@ -88,7 +95,11 @@ class RedisClientTransport
 	end
 
 	def send_data(data)
-    @redis.rpush(@queue_name, [data, REDIS_DATA, @return_queue_name].to_msgpack)
+	  if @ignore_return_value
+      @redis.rpush(@queue_name, [data, REDIS_DATA].to_msgpack)
+    else
+      @redis.rpush(@queue_name, [data, REDIS_DATA, @return_queue_name].to_msgpack)
+    end
 	end
 
 	def close
@@ -111,6 +122,7 @@ end
 
 class RedisServerTransport
 	def initialize(name, redis_options = {})
+	  @ignore_nil_returns = !!redis_options.delete(:ignore_nil_returns)
 		@redis = Redis.new(redis_options)
 		@queue_name = "msgpack_queue:#{name}"
 	end
@@ -121,10 +133,10 @@ class RedisServerTransport
     loop do
       begin
     		data = @redis.blpop(@queue_name, 0)
-    		if data[1]
+    		if data && data[1]
     		  redis_packet = MessagePack.unpack(data[1])
     		  if redis_packet[1] == REDIS_DATA
-    		    @identifier = redis_packet[2]
+    		    @return_queue_name = redis_packet[2]
     		    msg = MessagePack.unpack(redis_packet[0])
       		  case msg[0]
         		when REQUEST
@@ -145,7 +157,7 @@ class RedisServerTransport
 	end
 	
 	def send_data(data)
-    @redis.rpush(@identifier, [data, REDIS_DATA].to_msgpack) if @identifier
+    @redis.rpush(@return_queue_name, [data, REDIS_DATA].to_msgpack) if @return_queue_name
   end
 
 	# ServerTransport interface
